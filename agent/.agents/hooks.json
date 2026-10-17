@@ -1,0 +1,27 @@
+{
+  "gamesmith": {
+    "enabled": true,
+    "pre_tool_execution": [
+      {
+        "matcher": "write_to_file|replace_file_content|delete_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /.agents/hooks-scripts/gate.py",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "code_execution",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /.agents/hooks-scripts/gate.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
