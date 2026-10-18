@@ -37,6 +37,17 @@ import {
   type BuildStageName,
   type MockGameKey,
 } from "./attract";
+import { humController } from "../audio/hum";
+import {
+  createNeonCarpetCanvas,
+  createPinballMachine,
+  createCabinetBank,
+  createClawMachine,
+  createSnackCorner,
+  createCeilingArchitecture,
+  createWallDecorations,
+  type InteractiveMachine,
+} from "./arcadeProps";
 
 export type StepCameraMode =
   | 1
@@ -541,6 +552,16 @@ export class ArcadeStage {
     lastFrameStamp: number;
   } | null = null;
 
+  // 90s Neon Arcade Expansion
+  public interactiveMachines: InteractiveMachine[] = [];
+  public currentLightingMood: "midnight" | "sunset" | "synthwave" = "midnight";
+  private nearestMachine: InteractiveMachine | null = null;
+  private nearestMachineDistance = Infinity;
+  private onProximityChangeCb:
+    | ((info: { machine: InteractiveMachine | null; distance: number }) => void)
+    | null = null;
+  private walkStepAudioTimer = 0;
+
   constructor(container: HTMLElement) {
     this.container = container;
     this.crtTex = createCrtDataTexture(320, 200);
@@ -725,6 +746,7 @@ export class ArcadeStage {
       }
     }
 
+    this.setLightingMood("midnight");
     this.clock.start();
     this.t0 = performance.now();
     const tick = () => {
@@ -866,11 +888,21 @@ export class ArcadeStage {
     const room = new THREE.Group();
     room.name = "DuskArcadeRoom";
 
-    // Wooden plank floor (64x64 canvas repeated 7x7 on 14x14 PlaneGeometry at (0, 0, -1))
-    const floorMat = lam("#ffffff", { map: canTex(planks(), 7, 7) });
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), floorMat);
+    // 90s Fluorescent Blacklight Carpet (procedural canvas repeated on deep plane)
+    const carpetCanvas = createNeonCarpetCanvas(512);
+    const carpetTex = new THREE.CanvasTexture(carpetCanvas);
+    carpetTex.wrapS = THREE.RepeatWrapping;
+    carpetTex.wrapT = THREE.RepeatWrapping;
+    carpetTex.repeat.set(10, 10);
+    carpetTex.anisotropy = 8;
+    const floorMat = new THREE.MeshStandardMaterial({
+      map: carpetTex,
+      roughness: 0.85,
+      metalness: 0.05,
+    });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(16, 16), floorMat);
     floor.rotation.x = -Math.PI / 2;
-    floor.position.set(0, 0, -1);
+    floor.position.set(0, 0, 0.5);
     floor.receiveShadow = true;
     room.add(floor);
 
@@ -1098,75 +1130,81 @@ export class ArcadeStage {
     rug.receiveShadow = true;
     room.add(rug);
 
-    // --- STATION 2: Club No.9 Ludo Parlour Table (Left Wing: x = -1.65, z = -0.45) ---
-    const ltx = -1.65;
-    const ltz = -0.45;
-    const ludoWoodGeos = [
-      makeBoxGeo(0.92, 0.06, 0.68, ltx, 0.66, ltz, 0.22),
-      makeBoxGeo(0.06, 0.64, 0.06, ltx - 0.36, 0.32, ltz - 0.22),
-      makeBoxGeo(0.06, 0.64, 0.06, ltx + 0.36, 0.32, ltz - 0.22),
-      makeBoxGeo(0.06, 0.64, 0.06, ltx - 0.36, 0.32, ltz + 0.22),
-      makeBoxGeo(0.06, 0.64, 0.06, ltx + 0.36, 0.32, ltz + 0.22),
-    ];
-    const ludoTableMesh = new THREE.Mesh(
-      mergeGeometries(ludoWoodGeos),
-      lam(C.dbrown)
-    );
-    ludoTableMesh.castShadow = true;
-    ludoTableMesh.receiveShadow = true;
-    room.add(ludoTableMesh);
+    // ========================================================
+    // 90s NEON ARCADE EXPANSION: MACHINES, ATTRACTIONS & PROPS
+    // ========================================================
+    this.interactiveMachines = [];
 
-    const ludoBoardCanvas = mk(32, 32);
-    const lbx = ludoBoardCanvas.getContext("2d")!;
-    lbx.fillStyle = C.cream;
-    lbx.fillRect(0, 0, 32, 32);
-    lbx.fillStyle = "#e0493a";
-    lbx.fillRect(2, 2, 11, 11);
-    lbx.fillStyle = "#35b25a";
-    lbx.fillRect(19, 2, 11, 11);
-    lbx.fillStyle = "#f2c230";
-    lbx.fillRect(19, 19, 11, 11);
-    lbx.fillStyle = "#3a74e0";
-    lbx.fillRect(2, 19, 11, 11);
-    const ludoSurface = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.46, 0.46),
-      new THREE.MeshBasicMaterial({ map: canTex(ludoBoardCanvas) })
-    );
-    ludoSurface.rotation.x = -Math.PI / 2;
-    ludoSurface.rotation.z = 0.22;
-    ludoSurface.position.set(ltx - 0.1, 0.695, ltz);
-    room.add(ludoSurface);
+    // 1. Ceiling Architecture (Galvanized Air Ducts & Hanging Neon Tubes)
+    room.add(createCeilingArchitecture());
 
-    // --- STATION 3: Classics Arcade Cabinet & STATION 4: Multiplayer Terminal Kiosk ---
-    const stx = 1.65;
-    const stz = -0.35;
-    const kx = 0.95;
-    const kz = -1.22;
-    const stationBodyGeos = [
-      // Classics secondary cabinet body
-      makeBoxGeo(0.64, 1.38, 0.64, stx, 0.69, stz, -0.32),
-      // Multiplayer kiosk pedestal
-      makeBoxGeo(0.46, 1.24, 0.42, kx, 0.62, kz, -0.18),
-    ];
-    const stationBodyMesh = new THREE.Mesh(
-      mergeGeometries(stationBodyGeos),
-      lam(C.dnavy)
-    );
-    stationBodyMesh.castShadow = true;
-    stationBodyMesh.receiveShadow = true;
-    room.add(stationBodyMesh);
+    // 2. Wall Decor (Large Back-Wall Neon "ARCADE" + High Scores Board)
+    room.add(createWallDecorations());
 
-    const stationScreensGeos = [
-      // Classics CRT & marquee glow
-      makeBoxGeo(0.5, 0.32, 0.04, stx - 0.1, 0.96, stz + 0.3, -0.32),
-      // Multiplayer Kiosk glowing cyan screen
-      makeBoxGeo(0.38, 0.28, 0.04, kx - 0.04, 0.96, kz + 0.2, -0.18),
-    ];
-    const stationScreenMesh = new THREE.Mesh(
-      mergeGeometries(stationScreensGeos),
-      new THREE.MeshBasicMaterial({ color: lin(C.blue) })
+    // 3. Vintage Pinball Alley (Left Wing)
+    // Pinball 1: Space Odyssey 1988
+    const pinball1 = createPinballMachine(
+      "Space Odyssey",
+      "#1a0933",
+      "#00f0ff",
+      -3.1,
+      -0.4,
+      Math.PI / 2
     );
-    room.add(stationScreenMesh);
+    room.add(pinball1.group);
+    this.interactiveMachines.push(pinball1.machine);
+
+    // Pinball 2: Cyber Knight 2099
+    const pinball2 = createPinballMachine(
+      "Cyber Knight",
+      "#3a0ca3",
+      "#ff007f",
+      -3.1,
+      0.95,
+      Math.PI / 2
+    );
+    room.add(pinball2.group);
+    this.interactiveMachines.push(pinball2.machine);
+
+    // 4. Illuminated Prize Claw / Crane Machine (Left Front Corner)
+    const claw = createClawMachine(-2.2, 2.3);
+    room.add(claw.group);
+    this.interactiveMachines.push(claw.machine);
+
+    // 5. Classic 3-Cabinet Bank Row (Right Wall)
+    // Street Brawler, Nebula 1989, Turbo Drift
+    const cabBank = createCabinetBank(2.85, -0.1);
+    room.add(cabBank.group);
+    this.interactiveMachines.push(...cabBank.machines);
+
+    // 6. Retro Refreshment & Token Corner (Back Left) + Snack Counter (Near Front)
+    // Soda Vending Machine, Token Changer, Red Gumball Machine, Diner Snack Bar
+    const snackCorner = createSnackCorner(-2.7, -2.1);
+    room.add(snackCorner.group);
+    this.interactiveMachines.push(...snackCorner.machines);
+
+    // 7. Hero Arcade Cabinet (Center x=0, z=0)
+    this.interactiveMachines.push({
+      id: "hero_arcade_cabinet",
+      name: "Hero Arcade Cabinet",
+      actionLabel: "Insert Coin & Play Hero Cabinet",
+      pos: new THREE.Vector3(0, 1.0, 0),
+      radius: 1.55,
+      trigger: () => {
+        humController.playArcadeCoin();
+        if (this.screenLight) {
+          this.screenLight.intensity = 3.2;
+          setTimeout(() => {
+            if (this.screenLight) {
+              this.screenLight.intensity =
+                this.currentLightingMood === "midnight" ? 2.2 : 1.4;
+            }
+          }, 350);
+        }
+        this.pressCabinetButton("action");
+        return "*CLINK!* +1 Credit Inserted in Hero Cabinet! CRT pulse!";
+      },
+    });
 
     // Group for walkable local & remote visitor avatars
     this.visitorsGroup = new THREE.Group();
@@ -2503,6 +2541,93 @@ export class ArcadeStage {
     };
   }
 
+  public setLightingMood(mood: "midnight" | "sunset" | "synthwave"): void {
+    this.currentLightingMood = mood;
+    if (!this.scene) return;
+
+    if (mood === "midnight") {
+      this.scene.background = new THREE.Color("#080512").convertSRGBToLinear();
+      if (this.scene.fog) {
+        this.scene.fog.color.set("#080512").convertSRGBToLinear();
+      }
+      if (this.sunLight) this.sunLight.intensity = 0.25;
+      if (this.hemiLight) {
+        this.hemiLight.color.set("#401860");
+        this.hemiLight.groundColor.set("#080414");
+        this.hemiLight.intensity = 0.45;
+      }
+      if (this.lampLight) this.lampLight.intensity = 1.4;
+      if (this.screenLight) this.screenLight.intensity = 2.2;
+      if (this.rimLight) this.rimLight.intensity = 1.6;
+      if (this.rim2Light) this.rim2Light.intensity = 1.8;
+    } else if (mood === "sunset") {
+      this.scene.background = new THREE.Color(C.dplum).convertSRGBToLinear();
+      if (this.scene.fog) {
+        this.scene.fog.color.set(C.dplum).convertSRGBToLinear();
+      }
+      if (this.sunLight) this.sunLight.intensity = 2.6;
+      if (this.hemiLight) {
+        this.hemiLight.color.set(C.lpeach);
+        this.hemiLight.groundColor.set(C.dplum);
+        this.hemiLight.intensity = 0.7;
+      }
+      if (this.lampLight) this.lampLight.intensity = 2.2;
+      if (this.screenLight) this.screenLight.intensity = 1.4;
+      if (this.rimLight) this.rimLight.intensity = 2.6;
+      if (this.rim2Light) this.rim2Light.intensity = 1.2;
+    } else if (mood === "synthwave") {
+      this.scene.background = new THREE.Color("#0c021c").convertSRGBToLinear();
+      if (this.scene.fog) {
+        this.scene.fog.color.set("#0c021c").convertSRGBToLinear();
+      }
+      if (this.sunLight) this.sunLight.intensity = 0.4;
+      if (this.hemiLight) {
+        this.hemiLight.color.set("#ff007f");
+        this.hemiLight.groundColor.set("#00f0ff");
+        this.hemiLight.intensity = 0.75;
+      }
+      if (this.lampLight) this.lampLight.intensity = 1.2;
+      if (this.screenLight) this.screenLight.intensity = 2.6;
+      if (this.rimLight) {
+        this.rimLight.color.set("#ff007f");
+        this.rimLight.intensity = 3.0;
+      }
+      if (this.rim2Light) {
+        this.rim2Light.color.set("#00f0ff");
+        this.rim2Light.intensity = 2.6;
+      }
+    }
+  }
+
+  public setProximityCallback(
+    cb: ((info: { machine: InteractiveMachine | null; distance: number }) => void) | null
+  ): void {
+    this.onProximityChangeCb = cb;
+  }
+
+  public getNearestMachine(): { machine: InteractiveMachine | null; distance: number } {
+    let nearest: InteractiveMachine | null = null;
+    let minDist = Infinity;
+    for (const m of this.interactiveMachines) {
+      const d = this.walkPlayerPos.distanceTo(m.pos);
+      if (d <= m.radius && d < minDist) {
+        minDist = d;
+        nearest = m;
+      }
+    }
+    return { machine: nearest, distance: minDist };
+  }
+
+  public triggerInteraction(machineId?: string): string | null {
+    if (machineId) {
+      const target = this.interactiveMachines.find((m) => m.id === machineId);
+      if (target) return target.trigger();
+    }
+    const { machine } = this.getNearestMachine();
+    if (!machine) return null;
+    return machine.trigger();
+  }
+
   private updateFreeWalkCamera(dt: number): void {
     // 1. Forward and right unit vectors on the horizontal XZ plane
     // walkYaw = 0 points towards -Z (looking straight into the arcade room)
@@ -2539,58 +2664,83 @@ export class ArcadeStage {
     this.walkPlayerPos.x += this.walkVel.x * dt;
     this.walkPlayerPos.z += this.walkVel.z * dt;
 
-    // 6. Collision boundaries with room walls (-3.8 to 3.8, -1.2 to 4.4)
-    this.walkPlayerPos.x = THREE.MathUtils.clamp(this.walkPlayerPos.x, -3.8, 3.8);
-    this.walkPlayerPos.z = THREE.MathUtils.clamp(this.walkPlayerPos.z, -1.2, 4.4);
+    // 6. Collision boundaries with room walls (-3.85 to 3.85, -2.15 to 4.35)
+    this.walkPlayerPos.x = THREE.MathUtils.clamp(this.walkPlayerPos.x, -3.85, 3.85);
+    this.walkPlayerPos.z = THREE.MathUtils.clamp(this.walkPlayerPos.z, -2.15, 4.35);
 
     // Smooth obstacle colliders:
     // A. Hero arcade cabinet at (0, 0)
     const dCab = Math.hypot(this.walkPlayerPos.x, this.walkPlayerPos.z);
-    if (dCab < 0.62) {
-      const scale = 0.62 / (dCab || 0.001);
+    if (dCab < 0.65) {
+      const scale = 0.65 / (dCab || 0.001);
       this.walkPlayerPos.x *= scale;
       this.walkPlayerPos.z *= scale;
     }
 
-    // B. Left table at (-1.65, -0.45)
-    const dxT = this.walkPlayerPos.x - (-1.65);
-    const dzT = this.walkPlayerPos.z - (-0.45);
-    const distT = Math.hypot(dxT, dzT);
-    if (distT < 0.72) {
-      const scale = 0.72 / (distT || 0.001);
-      this.walkPlayerPos.x = -1.65 + dxT * scale;
-      this.walkPlayerPos.z = -0.45 + dzT * scale;
+    // B. Left Pinball Tables (X: -3.5 to -2.6, Z: -1.2 to 1.65)
+    if (
+      this.walkPlayerPos.x < -2.48 &&
+      this.walkPlayerPos.z > -1.25 &&
+      this.walkPlayerPos.z < 1.65
+    ) {
+      this.walkPlayerPos.x = -2.48;
     }
 
-    // C. Classics cabinet at (1.65, -0.35)
-    const dxC = this.walkPlayerPos.x - 1.65;
-    const dzC = this.walkPlayerPos.z - (-0.35);
-    const distC = Math.hypot(dxC, dzC);
-    if (distC < 0.65) {
-      const scale = 0.65 / (distC || 0.001);
-      this.walkPlayerPos.x = 1.65 + dxC * scale;
-      this.walkPlayerPos.z = -0.35 + dzC * scale;
+    // C. Left Claw Machine (X: -2.2, Z: 2.3)
+    const dxClaw = this.walkPlayerPos.x - -2.2;
+    const dzClaw = this.walkPlayerPos.z - 2.3;
+    const distClaw = Math.hypot(dxClaw, dzClaw);
+    if (distClaw < 0.72) {
+      const scale = 0.72 / (distClaw || 0.001);
+      this.walkPlayerPos.x = -2.2 + dxClaw * scale;
+      this.walkPlayerPos.z = 2.3 + dzClaw * scale;
     }
 
-    // D. Kiosk at (0.95, -1.22)
-    const dxK = this.walkPlayerPos.x - 0.95;
-    const dzK = this.walkPlayerPos.z - (-1.22);
-    const distK = Math.hypot(dxK, dzK);
-    if (distK < 0.55) {
-      const scale = 0.55 / (distK || 0.001);
-      this.walkPlayerPos.x = 0.95 + dxK * scale;
-      this.walkPlayerPos.z = -1.22 + dzK * scale;
+    // D. Back-Left Vending & Token Changer Row (Z < -1.52, X: -3.7 to -0.55)
+    if (
+      this.walkPlayerPos.z < -1.52 &&
+      this.walkPlayerPos.x < -0.55 &&
+      this.walkPlayerPos.x > -3.7
+    ) {
+      this.walkPlayerPos.z = -1.52;
     }
 
-    // 7. Subtle head bobbing when walking
+    // E. Right Cabinet Bank Row (X > 2.22, Z: -1.65 to 1.65)
+    if (
+      this.walkPlayerPos.x > 2.22 &&
+      this.walkPlayerPos.z > -1.65 &&
+      this.walkPlayerPos.z < 1.65
+    ) {
+      this.walkPlayerPos.x = 2.22;
+    }
+
+    // F. Snack Counter & Bar Stools (Z > 3.12, X: -2.25 to -0.15)
+    if (
+      this.walkPlayerPos.z > 3.12 &&
+      this.walkPlayerPos.x > -2.25 &&
+      this.walkPlayerPos.x < -0.15
+    ) {
+      this.walkPlayerPos.z = 3.12;
+    }
+
+    // 7. Subtle head bobbing & Footstep SFX when walking
     const moveSpeed = Math.hypot(this.walkVel.x, this.walkVel.z);
     if (moveSpeed > 0.1) {
       this.walkStepTimer += dt * moveSpeed * 3.8;
       this.walkHeadBob.y = Math.sin(this.walkStepTimer * 2) * 0.022;
       this.walkHeadBob.x = Math.cos(this.walkStepTimer) * 0.01;
+
+      // Footstep sound synthesis rhythm
+      this.walkStepAudioTimer += dt;
+      const stepInterval = this.walkKeys.sprint ? 0.3 : 0.44;
+      if (this.walkStepAudioTimer >= stepInterval) {
+        this.walkStepAudioTimer = 0;
+        humController.playFootstep();
+      }
     } else {
       this.walkHeadBob.y *= Math.max(0, 1 - dt * 10);
       this.walkHeadBob.x *= Math.max(0, 1 - dt * 10);
+      this.walkStepAudioTimer = 0.22;
     }
 
     // 8. Apply camera position and orientation
@@ -2914,6 +3064,24 @@ export class ArcadeStage {
     }
 
     this.updateProgressiveTransitions(dt, t);
+
+    // Update all 90s interactive arcade machines
+    for (const m of this.interactiveMachines) {
+      m.update?.(dt, t);
+    }
+
+    // Check proximity to interactive machines
+    if (this.onProximityChangeCb) {
+      const { machine, distance } = this.getNearestMachine();
+      if (
+        machine !== this.nearestMachine ||
+        Math.abs(distance - this.nearestMachineDistance) > 0.05
+      ) {
+        this.nearestMachine = machine;
+        this.nearestMachineDistance = distance;
+        this.onProximityChangeCb({ machine, distance });
+      }
+    }
 
     // 3. Update camera framing & spring
     if (this.freeWalkActive && !this.benchRecording && !this.uvTestActive) {

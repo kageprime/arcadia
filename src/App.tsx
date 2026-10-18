@@ -75,6 +75,15 @@ const ArcadeEnvironmentWalk: React.FC = () => {
   const [muted, setMuted] = useState(() => humController.isMuted());
   const [hintVisible, setHintVisible] = useState(true);
   const [isTouchDevice, setIsTouchDevice] = useState(false);
+  const [nearbyMachine, setNearbyMachine] = useState<{
+    id: string;
+    name: string;
+    actionLabel: string;
+  } | null>(null);
+  const [interactionToast, setInteractionToast] = useState<string | null>(null);
+  const [lightingMood, setLightingMood] = useState<"midnight" | "sunset" | "synthwave">(
+    "midnight"
+  );
 
   // Active key state for walking
   const keysRef = useRef({
@@ -110,6 +119,19 @@ const ArcadeEnvironmentWalk: React.FC = () => {
       setPointerLocked(locked);
     });
 
+    // Listen for proximity to interactive arcade machines
+    stage.setProximityCallback((info) => {
+      if (info.machine) {
+        setNearbyMachine({
+          id: info.machine.id,
+          name: info.machine.name,
+          actionLabel: info.machine.actionLabel,
+        });
+      } else {
+        setNearbyMachine(null);
+      }
+    });
+
     let disposed = false;
     stage.init().then(() => {
       if (disposed) return;
@@ -122,6 +144,7 @@ const ArcadeEnvironmentWalk: React.FC = () => {
       stage.useAttractScreen(true);
       stage.setFreeWalk(true);
       stage.resetWalkPosition(0, 2.4, 0, -0.04);
+      stage.setLightingMood("midnight");
 
       // Start ambient arcade audio if not muted
       humController.ensureStarted();
@@ -163,13 +186,33 @@ const ArcadeEnvironmentWalk: React.FC = () => {
     setMuted(nextMuted);
   }, []);
 
+  // Trigger interaction with nearest machine (Key E)
+  const handleInteract = useCallback(() => {
+    if (!stageRef.current) return;
+    const feedback = stageRef.current.triggerInteraction();
+    if (feedback) {
+      setInteractionToast(feedback);
+      setTimeout(() => {
+        setInteractionToast(null);
+      }, 3500);
+    }
+  }, []);
+
+  // Switch room lighting mood (Midnight Neon, Sunset Dusk, Synthwave)
+  const handleSwitchMood = useCallback((mood: "midnight" | "sunset" | "synthwave") => {
+    setLightingMood(mood);
+    stageRef.current?.setLightingMood(mood);
+  }, []);
+
   // Global Keyboard listener for free walking
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
       let changed = false;
 
-      if (k === "w" || k === "arrowup") {
+      if (k === "e") {
+        handleInteract();
+      } else if (k === "w" || k === "arrowup") {
         if (!keysRef.current.forward) {
           keysRef.current.forward = true;
           changed = true;
@@ -339,6 +382,34 @@ const ArcadeEnvironmentWalk: React.FC = () => {
 
         {/* Top-right action controls */}
         <div className="walk-top-bar">
+          {/* Lighting Mood Presets */}
+          <div className="lighting-mood-group" role="radiogroup" aria-label="Room lighting mood">
+            <button
+              type="button"
+              className={`lighting-pill-opt ${lightingMood === "midnight" ? "active" : ""}`}
+              onClick={() => handleSwitchMood("midnight")}
+              title="Midnight Neon: blacklight carpet and glowing CRTs"
+            >
+              🌙 Midnight
+            </button>
+            <button
+              type="button"
+              className={`lighting-pill-opt ${lightingMood === "sunset" ? "active" : ""}`}
+              onClick={() => handleSwitchMood("sunset")}
+              title="Sunset: Golden hour sunlight through window"
+            >
+              🌇 Sunset
+            </button>
+            <button
+              type="button"
+              className={`lighting-pill-opt ${lightingMood === "synthwave" ? "active" : ""}`}
+              onClick={() => handleSwitchMood("synthwave")}
+              title="Synthwave: High contrast magenta and cyan rimlights"
+            >
+              ⚡ Synth
+            </button>
+          </div>
+
           {!isTouchDevice && (
             <button
               type="button"
@@ -432,6 +503,29 @@ const ArcadeEnvironmentWalk: React.FC = () => {
           </button>
         </div>
 
+        {/* Proximity Interaction Floating Prompt (Key E) */}
+        {nearbyMachine && (
+          <button
+            type="button"
+            className="walk-interact-prompt"
+            onClick={handleInteract}
+            aria-label={nearbyMachine.actionLabel}
+          >
+            <span className="interact-key-pill">E</span>
+            <div className="interact-label-group">
+              <span className="interact-name">{nearbyMachine.name}</span>
+              <span className="interact-action">{nearbyMachine.actionLabel}</span>
+            </div>
+          </button>
+        )}
+
+        {/* Retro Action Feedback Toast Banner */}
+        {interactionToast && (
+          <div className="arcade-toast" role="status" aria-live="assertive">
+            <span>{interactionToast}</span>
+          </div>
+        )}
+
         {/* Bottom hint banner: walking and camera look controls */}
         {hintVisible && (
           <div className="walk-bottom-hud" role="status" aria-live="polite">
@@ -444,10 +538,10 @@ const ArcadeEnvironmentWalk: React.FC = () => {
               </span>
               <span className="walk-hint-text">
                 {pointerLocked
-                  ? "Move mouse to look around · Shift to sprint · ESC to unlock cursor"
+                  ? "Move mouse to look around · Shift sprint · E interact · ESC unlock"
                   : isTouchDevice
-                  ? "Use D-Pad to walk · Drag to look around"
-                  : "Walk freely · Drag or click to look around · Shift sprint · R reset"}
+                  ? "Use D-Pad to walk · Drag to look around · Tap E to interact"
+                  : "Walk freely · Drag or click to look around · E interact · Shift sprint · R reset"}
               </span>
               <button
                 type="button"
@@ -507,6 +601,17 @@ const ArcadeEnvironmentWalk: React.FC = () => {
                 ▶
               </button>
             </div>
+
+            {/* Mobile Interaction E Button */}
+            <button
+              type="button"
+              className="touch-action-btn"
+              onClick={handleInteract}
+              aria-label="Interact with nearby machine"
+            >
+              <span>ACTION</span>
+              E
+            </button>
           </div>
         )}
       </div>

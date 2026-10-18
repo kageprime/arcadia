@@ -1509,4 +1509,170 @@ canvas#gl,
   }
 }
 
+/* 90s Neon Arcade Expansion Styles */
+.lighting-mood-group {
+  display: flex;
+  align-items: center;
+  background: rgba(14, 17, 36, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.lighting-pill-opt {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.65);
+  font: 600 11px/1 var(--m);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.lighting-pill-opt:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.lighting-pill-opt.active {
+  background: linear-gradient(135deg, rgba(255, 0, 127, 0.35), rgba(0, 240, 255, 0.35));
+  color: #fff;
+  border: 1px solid rgba(0, 240, 255, 0.5);
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.3);
+}
+
+/* Proximity Interaction Floating Prompt */
+.walk-interact-prompt {
+  position: fixed;
+  bottom: 84px;
+  left: 50%;
+  transform: translateX(-50%) translateY(0);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: rgba(11, 7, 20, 0.88);
+  border: 1.5px solid rgba(0, 240, 255, 0.7);
+  box-shadow: 0 0 24px rgba(0, 240, 255, 0.35), 0 8px 32px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(12px);
+  z-index: 25;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: promptPulse 1.8s infinite alternate ease-in-out;
+}
+
+@keyframes promptPulse {
+  0% { box-shadow: 0 0 16px rgba(0, 240, 255, 0.25), 0 4px 20px rgba(0,0,0,0.5); }
+  100% { box-shadow: 0 0 28px rgba(255, 0, 127, 0.45), 0 6px 28px rgba(0,0,0,0.7); border-color: rgba(255, 0, 127, 0.8); }
+}
+
+.walk-interact-prompt:hover {
+  transform: translateX(-50%) translateY(-2px) scale(1.03);
+}
+
+.interact-key-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #ffee00, #ff9900);
+  color: #111;
+  font: 700 13px/1 'Press Start 2P', monospace;
+  box-shadow: 0 2px 0 #cc6600, 0 0 10px rgba(255, 238, 0, 0.5);
+}
+
+.interact-label-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+
+.interact-name {
+  font: 700 10px/1 'Press Start 2P', monospace;
+  color: #00f0ff;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.interact-action {
+  font: 600 13px/1.2 var(--f);
+  color: #ffffff;
+}
+
+/* Retro Action Feedback Toast */
+.arcade-toast {
+  position: fixed;
+  top: 86px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 22px;
+  border-radius: 12px;
+  background: rgba(13, 8, 22, 0.94);
+  border: 1.5px solid #ff007f;
+  box-shadow: 0 0 30px rgba(255, 0, 127, 0.4), 0 8px 30px rgba(0, 0, 0, 0.8);
+  color: #ffee00;
+  font: 700 12px/1.4 'Press Start 2P', monospace;
+  z-index: 30;
+  pointer-events: none;
+  animation: toastPop 0.25s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+  letter-spacing: 0.02em;
+}
+
+@keyframes toastPop {
+  0% { transform: translateX(-50%) translateY(-12px) scale(0.9); opacity: 0; }
+  100% { transform: translateX(-50%) translateY(0) scale(1); opacity: 1; }
+}
+
+/* Mobile Touch Interact Action Button */
+.touch-action-btn {
+  position: absolute;
+  right: 28px;
+  bottom: 34px;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ff007f, #b5179e);
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  box-shadow: 0 0 20px rgba(255, 0, 127, 0.5), 0 8px 24px rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font: 700 18px/1 'Press Start 2P', monospace;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+.touch-action-btn:active {
+  transform: scale(0.92);
+}
+
+.touch-action-btn span {
+  font: 600 9px/1 var(--m);
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.85);
+}
+
 

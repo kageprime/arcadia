@@ -579,6 +579,14 @@ export class HumController {
     src.stop(startTime + duration + 0.01);
   }
 
+  private triggerNoise(
+    startTime: number,
+    duration: number,
+    peakGain: number,
+  ): void {
+    this.triggerNoiseBurst(startTime, duration, peakGain);
+  }
+
   /**
    * Mechanical pinball solenoid clack, flipper slap, and bumper bells.
    */
