@@ -3,6 +3,10 @@ import "./styles/playglow.css";
 import { SelfTest } from "./selftest/SelfTest";
 import { ArcadeStage } from "./stage/ArcadeStage";
 import { humController } from "./audio/hum";
+import {
+  multiplayerClient,
+  type MultiplayerSnapshot,
+} from "./net/multiplayerClient";
 
 class ArcadeErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -85,6 +89,20 @@ const ArcadeEnvironmentWalk: React.FC = () => {
     "midnight"
   );
 
+  // Social & Cabinet Game States
+  const [activeCabinetGame, setActiveCabinetGame] = useState<"chess" | null>(null);
+  const [showEmoteDock, setShowEmoteDock] = useState(false);
+  const [customEmoteText, setCustomEmoteText] = useState("");
+  const [mpSnapshot, setMpSnapshot] = useState<MultiplayerSnapshot>(() =>
+    multiplayerClient.getSnapshot()
+  );
+  const [emoteToast, setEmoteToast] = useState<{
+    id: string;
+    name: string;
+    text: string;
+    emoji?: string;
+  } | null>(null);
+
   // Active key state for walking
   const keysRef = useRef({
     forward: false,
@@ -161,6 +179,40 @@ const ArcadeEnvironmentWalk: React.FC = () => {
     };
   }, []);
 
+  // Connect and sync real-time multiplayer visitors
+  useEffect(() => {
+    multiplayerClient.connect();
+    const unsubSnap = multiplayerClient.subscribe((snap) => {
+      setMpSnapshot(snap);
+    });
+
+    const unsubEmote = multiplayerClient.onEmote((data) => {
+      setEmoteToast(data);
+      setTimeout(() => {
+        setEmoteToast((prev) => (prev?.id === data.id && prev?.text === data.text ? null : prev));
+      }, 4200);
+    });
+
+    // 15 Hz position & avatar synchronization
+    const syncInterval = setInterval(() => {
+      if (!stageRef.current) return;
+      const walkState = stageRef.current.getWalkState();
+      multiplayerClient.updatePosition(walkState.x, walkState.z, walkState.yaw, "walk");
+      const visitorsList = Array.from(multiplayerClient.visitors.values());
+      stageRef.current.syncWalkVisitors(
+        { x: walkState.x, z: walkState.z, yaw: walkState.yaw },
+        visitorsList,
+        true
+      );
+    }, 66);
+
+    return () => {
+      unsubSnap();
+      unsubEmote();
+      clearInterval(syncInterval);
+    };
+  }, []);
+
   // Update stage walk keys
   const updateWalkKeys = useCallback(() => {
     stageRef.current?.setWalkKeys(keysRef.current);
@@ -186,17 +238,45 @@ const ArcadeEnvironmentWalk: React.FC = () => {
     setMuted(nextMuted);
   }, []);
 
+  // Launch Pixel Chess inside arcade CRT bezel overlay
+  const handleLaunchChess = useCallback(() => {
+    humController.playArcadeCoin();
+    setActiveCabinetGame("chess");
+    stageRef.current?.dollyToCabinet("pixel_chess");
+  }, []);
+
+  // Step back from arcade cabinet into free walk
+  const handleExitCabinet = useCallback(() => {
+    setActiveCabinetGame(null);
+    stageRef.current?.exitCabinetView();
+  }, []);
+
+  // Send speech bubble emote in room
+  const handleSendEmote = useCallback((text: string, emoji?: string) => {
+    multiplayerClient.sendEmote(text, emoji);
+    humController.playFootstep();
+    setShowEmoteDock(false);
+  }, []);
+
   // Trigger interaction with nearest machine (Key E)
   const handleInteract = useCallback(() => {
     if (!stageRef.current) return;
+    if (nearbyMachine?.id === "pixel_chess") {
+      handleLaunchChess();
+      return;
+    }
     const feedback = stageRef.current.triggerInteraction();
     if (feedback) {
-      setInteractionToast(feedback);
-      setTimeout(() => {
-        setInteractionToast(null);
-      }, 3500);
+      if (feedback.toLowerCase().includes("pixel chess")) {
+        handleLaunchChess();
+      } else {
+        setInteractionToast(feedback);
+        setTimeout(() => {
+          setInteractionToast(null);
+        }, 3500);
+      }
     }
-  }, []);
+  }, [nearbyMachine, handleLaunchChess]);
 
   // Switch room lighting mood (Midnight Neon, Sunset Dusk, Synthwave)
   const handleSwitchMood = useCallback((mood: "midnight" | "sunset" | "synthwave") => {
@@ -204,11 +284,30 @@ const ArcadeEnvironmentWalk: React.FC = () => {
     stageRef.current?.setLightingMood(mood);
   }, []);
 
-  // Global Keyboard listener for free walking
+  // Global Keyboard listener for free walking, cabinet exits, and emotes
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept when typing in chat/emote text box
+      if ((e.target as HTMLElement)?.tagName === "INPUT") return;
+
       const k = e.key.toLowerCase();
       let changed = false;
+
+      if (e.key === "Escape") {
+        if (activeCabinetGame) {
+          handleExitCabinet();
+          return;
+        }
+        if (showEmoteDock) {
+          setShowEmoteDock(false);
+          return;
+        }
+      }
+
+      if (k === "c") {
+        setShowEmoteDock((prev) => !prev);
+        return;
+      }
 
       if (k === "e") {
         handleInteract();
@@ -247,6 +346,8 @@ const ArcadeEnvironmentWalk: React.FC = () => {
     };
 
     const onKeyUp = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement)?.tagName === "INPUT") return;
+
       const k = e.key.toLowerCase();
       let changed = false;
 
@@ -302,7 +403,14 @@ const ArcadeEnvironmentWalk: React.FC = () => {
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
     };
-  }, [updateWalkKeys, handleResetPosition]);
+  }, [
+    updateWalkKeys,
+    handleResetPosition,
+    handleInteract,
+    handleExitCabinet,
+    activeCabinetGame,
+    showEmoteDock,
+  ]);
 
   // Touch controls for mobile / tablet devices
   const setTouchMove = (
@@ -318,8 +426,12 @@ const ArcadeEnvironmentWalk: React.FC = () => {
 
   const handleTouchStart = (e: React.TouchEvent) => {
     const target = e.target as HTMLElement | null;
-    // Don't hijack virtual d-pad or buttons
-    if (target?.closest("button") || target?.closest(".touch-dpad")) {
+    if (
+      target?.closest("button") ||
+      target?.closest(".touch-dpad") ||
+      target?.closest(".cabinet-bezel-modal") ||
+      target?.closest(".quick-emote-dock")
+    ) {
       return;
     }
     const t = e.touches[0];
@@ -341,6 +453,11 @@ const ArcadeEnvironmentWalk: React.FC = () => {
   const handleTouchEnd = () => {
     touchStartRef.current = null;
   };
+
+  // Total online users (remote connected players + simulated retro arcade patrons)
+  const totalOnline =
+    (mpSnapshot?.visitors?.length || 1) +
+    (stageRef.current?.getActivePatronCount() || 3);
 
   return (
     <>
@@ -371,13 +488,19 @@ const ArcadeEnvironmentWalk: React.FC = () => {
 
       {/* Atmospheric UI Overlay */}
       <div id="ui" data-state="walk">
-        {/* Subtle center gaze crosshair */}
+        {/* Center crosshair */}
         <div className="walk-reticle" aria-hidden="true" />
 
-        {/* Wordmark in top-left */}
-        <div className="wordmark">
-          <i />
-          arcade room
+        {/* Wordmark & Live Online Presence */}
+        <div className="wordmark-group">
+          <div className="wordmark">
+            <i />
+            arcade room
+          </div>
+          <div className="online-presence-badge" title="Live players and retro patrons in the arcade">
+            <span className="pulse-green-dot" />
+            <span className="online-count-text">{totalOnline} IN ROOM</span>
+          </div>
         </div>
 
         {/* Top-right action controls */}
@@ -409,6 +532,16 @@ const ArcadeEnvironmentWalk: React.FC = () => {
               ⚡ Synth
             </button>
           </div>
+
+          {/* Quick Emotes Button */}
+          <button
+            type="button"
+            className={`walk-pill-btn ${showEmoteDock ? "active" : ""}`}
+            onClick={() => setShowEmoteDock((prev) => !prev)}
+            title="Open Emote & Shout Menu (Key C)"
+          >
+            💬 <span>Emotes (C)</span>
+          </button>
 
           {!isTouchDevice && (
             <button
@@ -503,8 +636,77 @@ const ArcadeEnvironmentWalk: React.FC = () => {
           </button>
         </div>
 
+        {/* Quick Emote Dock Popover (Key C) */}
+        {showEmoteDock && (
+          <div className="quick-emote-dock" role="menu" aria-label="Social Emotes Menu">
+            <div className="emote-dock-header">
+              <span className="dock-title">💬 ARCADE SHOUTOUTS</span>
+              <button
+                type="button"
+                className="dock-close-btn"
+                onClick={() => setShowEmoteDock(false)}
+                title="Close (ESC)"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="emote-preset-grid">
+              {[
+                { emoji: "👑", text: "Checkmate!" },
+                { emoji: "🕹️", text: "GG!" },
+                { emoji: "⚡", text: "Match?" },
+                { emoji: "🔥", text: "Nice moves!" },
+                { emoji: "🥤", text: "Snack break!" },
+                { emoji: "🪙", text: "Got tokens!" },
+              ].map((opt) => (
+                <button
+                  key={opt.text}
+                  type="button"
+                  className="emote-preset-pill"
+                  onClick={() => handleSendEmote(opt.text, opt.emoji)}
+                >
+                  <span className="emote-icon">{opt.emoji}</span>
+                  <span className="emote-label">{opt.text}</span>
+                </button>
+              ))}
+            </div>
+            <form
+              className="custom-emote-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (customEmoteText.trim()) {
+                  handleSendEmote(customEmoteText.trim(), "💬");
+                  setCustomEmoteText("");
+                }
+              }}
+            >
+              <input
+                type="text"
+                className="custom-emote-input"
+                placeholder="Type custom shoutout… [Enter]"
+                maxLength={48}
+                value={customEmoteText}
+                onChange={(e) => setCustomEmoteText(e.target.value)}
+              />
+              <button type="submit" className="custom-emote-send">
+                SEND
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* Floating Social Emote Banner Toast */}
+        {emoteToast && (
+          <div className="emote-toast-banner" role="status" aria-live="polite">
+            <span className="emote-sender">{emoteToast.name}:</span>
+            <span className="emote-text">
+              {emoteToast.emoji} {emoteToast.text}
+            </span>
+          </div>
+        )}
+
         {/* Proximity Interaction Floating Prompt (Key E) */}
-        {nearbyMachine && (
+        {nearbyMachine && !activeCabinetGame && (
           <button
             type="button"
             className="walk-interact-prompt"
@@ -519,6 +721,92 @@ const ArcadeEnvironmentWalk: React.FC = () => {
           </button>
         )}
 
+        {/* Dedicated Pixel Chess Cabinet CRT Bezel Overlay */}
+        {activeCabinetGame === "chess" && (
+          <div
+            className="cabinet-bezel-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Pixel Chess Arcade Cabinet"
+          >
+            <div className="cabinet-bezel-frame">
+              {/* Backlit Arcade Marquee Header */}
+              <div className="bezel-top-marquee">
+                <div className="marquee-glow-badge">
+                  <span className="marquee-crown">♚</span>
+                  <span className="marquee-title">PIXEL CHESS</span>
+                  <span className="marquee-edition">1992 TOURNAMENT ROM</span>
+                </div>
+                <div className="bezel-top-actions">
+                  <a
+                    href="https://chessnuts-nine.vercel.app/chess/index.html"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bezel-link-btn"
+                    title="Open game in popout window"
+                  >
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.4"
+                    >
+                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                      <polyline points="15 3 21 3 21 9" />
+                      <line x1="10" y1="14" x2="21" y2="3" />
+                    </svg>
+                    <span>POPOUT</span>
+                  </a>
+                  <button
+                    type="button"
+                    className="bezel-exit-btn"
+                    onClick={handleExitCabinet}
+                    title="Step back to arcade free walk (ESC)"
+                  >
+                    <span>EXIT CABINET [ESC]</span>
+                    &times;
+                  </button>
+                </div>
+              </div>
+
+              {/* CRT Monitor Bezel & Live Iframe Game */}
+              <div className="bezel-crt-screen-holder">
+                <div className="crt-scanline-overlay" />
+                <div className="crt-glare-overlay" />
+                <iframe
+                  src="https://chessnuts-nine.vercel.app/chess/index.html"
+                  title="Pixel Chess Arcade Game"
+                  className="pixel-chess-iframe"
+                  allow="autoplay; encrypted-media; fullscreen"
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                />
+              </div>
+
+              {/* Bottom Arcade Control Deck Strip */}
+              <div className="bezel-bottom-bar">
+                <div className="bezel-deck-info">
+                  <span className="deck-coin-indicator">🪙 CREDITS: 02</span>
+                  <span className="deck-author-tag">
+                    PIXEL CHESS BY KAGEPRIME · ARCADE LINKED
+                  </span>
+                </div>
+                <div className="bezel-deck-hints">
+                  <button
+                    type="button"
+                    className="bezel-step-back-btn"
+                    onClick={handleExitCabinet}
+                  >
+                    <kbd className="bezel-kbd">ESC</kbd>
+                    <span>Step Back Into Room</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Retro Action Feedback Toast Banner */}
         {interactionToast && (
           <div className="arcade-toast" role="status" aria-live="assertive">
@@ -527,7 +815,7 @@ const ArcadeEnvironmentWalk: React.FC = () => {
         )}
 
         {/* Bottom hint banner: walking and camera look controls */}
-        {hintVisible && (
+        {hintVisible && !activeCabinetGame && (
           <div className="walk-bottom-hud" role="status" aria-live="polite">
             <div className="walk-hint-pill">
               <span className="walk-keys-group">
@@ -538,10 +826,10 @@ const ArcadeEnvironmentWalk: React.FC = () => {
               </span>
               <span className="walk-hint-text">
                 {pointerLocked
-                  ? "Move mouse to look around · Shift sprint · E interact · ESC unlock"
+                  ? "Move mouse to look · Shift sprint · E interact · C emotes · ESC unlock"
                   : isTouchDevice
-                  ? "Use D-Pad to walk · Drag to look around · Tap E to interact"
-                  : "Walk freely · Drag or click to look around · E interact · Shift sprint · R reset"}
+                  ? "Use D-Pad to walk · Drag to look around · Tap E to interact · Tap C for emotes"
+                  : "Walk freely · Drag or click to look around · E interact · C emotes · Shift sprint · R reset"}
               </span>
               <button
                 type="button"
@@ -557,7 +845,7 @@ const ArcadeEnvironmentWalk: React.FC = () => {
         )}
 
         {/* Mobile touch controls for walking */}
-        {isTouchDevice && (
+        {isTouchDevice && !activeCabinetGame && (
           <div className="touch-controls walk-touch-controls">
             <div className="touch-dpad">
               <button

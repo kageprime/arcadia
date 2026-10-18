@@ -46,6 +46,7 @@ import {
   createSnackCorner,
   createCeilingArchitecture,
   createWallDecorations,
+  createPixelChessCabinet,
   type InteractiveMachine,
 } from "./arcadeProps";
 
@@ -72,6 +73,12 @@ export interface WalkVisitorAvatar {
   x: number;
   z: number;
   yaw: number;
+  status?: string;
+  lastEmote?: {
+    text: string;
+    emoji?: string;
+    time: number;
+  };
 }
 
 export interface PreviewState {
@@ -552,15 +559,135 @@ export class ArcadeStage {
     lastFrameStamp: number;
   } | null = null;
 
-  // 90s Neon Arcade Expansion
+  // 90s Neon Arcade Expansion & Interactive Machines
   public interactiveMachines: InteractiveMachine[] = [];
   public currentLightingMood: "midnight" | "sunset" | "synthwave" = "midnight";
+  public cabinetFocusActive = false;
+  private pixelChessGroup: THREE.Group | null = null;
   private nearestMachine: InteractiveMachine | null = null;
   private nearestMachineDistance = Infinity;
   private onProximityChangeCb:
     | ((info: { machine: InteractiveMachine | null; distance: number }) => void)
     | null = null;
   private walkStepAudioTimer = 0;
+
+  // Lively simulated retro arcade patrons (NPCs)
+  private npcPatrons = [
+    {
+      id: "npc_dex",
+      name: "Dex",
+      color: "#00f0ff",
+      x: -2.3,
+      z: -0.4,
+      yaw: Math.PI / 2,
+      targetX: -2.3,
+      targetZ: -0.4,
+      speed: 0.9,
+      waitTimer: 6.0,
+      status: "Playing Space Odyssey 1988",
+      waypoints: [
+        {
+          x: -2.3,
+          z: -0.4,
+          yaw: Math.PI / 2,
+          status: "Playing Space Odyssey 1988",
+          emote: { emoji: "🚀", text: "New High Score!" },
+        },
+        {
+          x: -2.3,
+          z: 0.95,
+          yaw: Math.PI / 2,
+          status: "Playing Cyber Knight 2099",
+          emote: { emoji: "⚡", text: "Multi-ball frenzy!" },
+        },
+        {
+          x: 0.8,
+          z: -1.6,
+          yaw: 0,
+          status: "Checking High Scores",
+          emote: { emoji: "🏆", text: "Who is #1?" },
+        },
+      ],
+      wpIndex: 0,
+      lastEmote: { emoji: "🕹️", text: "Pinball wizard!", time: Date.now() },
+    },
+    {
+      id: "npc_penny",
+      name: "Penny",
+      color: "#ff007f",
+      x: 1.35,
+      z: -0.75,
+      yaw: -Math.PI / 4,
+      targetX: 1.35,
+      targetZ: -0.75,
+      speed: 0.8,
+      waitTimer: 8.0,
+      status: "Studying Pixel Chess board",
+      waypoints: [
+        {
+          x: 1.35,
+          z: -0.75,
+          yaw: -0.3,
+          status: "Studying Pixel Chess board",
+          emote: { emoji: "♞", text: "Knight to E5!" },
+        },
+        {
+          x: 1.45,
+          z: -0.6,
+          yaw: -0.2,
+          status: "Challenging Chess Tower",
+          emote: { emoji: "👑", text: "Checkmate incoming!" },
+        },
+        {
+          x: 0.0,
+          z: 0.75,
+          yaw: Math.PI,
+          status: "Watching Hero Cabinet",
+          emote: { emoji: "🔥", text: "Insane run!" },
+        },
+      ],
+      wpIndex: 0,
+      lastEmote: { emoji: "👑", text: "Checkmate incoming!", time: Date.now() },
+    },
+    {
+      id: "npc_ziggy",
+      name: "Ziggy",
+      color: "#ffd700",
+      x: -1.8,
+      z: 2.7,
+      yaw: 0,
+      targetX: -1.8,
+      targetZ: 2.7,
+      speed: 0.85,
+      waitTimer: 5.0,
+      status: "Grabbing soda at snack bar",
+      waypoints: [
+        {
+          x: -1.8,
+          z: 2.7,
+          yaw: 0,
+          status: "Grabbing soda at snack bar",
+          emote: { emoji: "🥤", text: "Cherry cola refill!" },
+        },
+        {
+          x: -1.6,
+          z: 2.1,
+          yaw: -Math.PI / 2,
+          status: "Playing claw machine",
+          emote: { emoji: "🧸", text: "Almost grabbed it!" },
+        },
+        {
+          x: -2.0,
+          z: -1.5,
+          yaw: Math.PI / 2,
+          status: "Getting arcade tokens",
+          emote: { emoji: "🪙", text: "Token change clink!" },
+        },
+      ],
+      wpIndex: 0,
+      lastEmote: { emoji: "🥤", text: "Cherry cola refill!", time: Date.now() },
+    },
+  ];
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -1205,6 +1332,12 @@ export class ArcadeStage {
         return "*CLINK!* +1 Credit Inserted in Hero Cabinet! CRT pulse!";
       },
     });
+
+    // 8. Dedicated Pixel Chess Arcade Cabinet (Right Wing near Hero, x: 1.6, z: -1.2)
+    const pixelChess = createPixelChessCabinet(1.6, -1.2, -0.2);
+    this.pixelChessGroup = pixelChess.group;
+    room.add(pixelChess.group);
+    this.interactiveMachines.push(pixelChess.machine);
 
     // Group for walkable local & remote visitor avatars
     this.visitorsGroup = new THREE.Group();
@@ -2256,13 +2389,85 @@ export class ArcadeStage {
     this.updateCrtFramebuffer(imgData.data);
   }
 
+  private createRetroTextSprite(
+    text: string,
+    bgColor: string,
+    strokeColor: string,
+    textColor: string,
+    isBubble = false
+  ): {
+    sprite: THREE.Sprite;
+    canvas: HTMLCanvasElement;
+    texture: THREE.CanvasTexture;
+    updateText: (t: string) => void;
+  } {
+    const canvas = document.createElement("canvas");
+    canvas.width = 384;
+    canvas.height = 80;
+    const ctx = canvas.getContext("2d")!;
+
+    const render = (str: string) => {
+      ctx.clearRect(0, 0, 384, 80);
+      ctx.fillStyle = bgColor;
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      if (typeof (ctx as any).roundRect === "function") {
+        (ctx as any).roundRect(6, 6, 372, 68, 16);
+      } else {
+        ctx.rect(6, 6, 372, 68);
+      }
+      ctx.fill();
+      ctx.stroke();
+
+      if (isBubble) {
+        ctx.beginPath();
+        ctx.moveTo(180, 74);
+        ctx.lineTo(192, 80);
+        ctx.lineTo(204, 74);
+        ctx.fillStyle = bgColor;
+        ctx.fill();
+      }
+
+      ctx.fillStyle = textColor;
+      ctx.font = isBubble
+        ? "bold 20px 'Press Start 2P', monospace, sans-serif"
+        : "bold 18px 'Press Start 2P', monospace, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const displayStr = str.length > 24 ? str.slice(0, 22) + "…" : str;
+      ctx.fillText(displayStr, 192, 40);
+    };
+
+    render(text);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    const mat = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(isBubble ? 1.05 : 0.76, isBubble ? 0.28 : 0.18, 1);
+
+    return {
+      sprite,
+      canvas,
+      texture,
+      updateText: (newText: string) => {
+        render(newText);
+        texture.needsUpdate = true;
+      },
+    };
+  }
+
   public syncWalkVisitors(
     localPos: { x: number; z: number; yaw: number },
     visitors: WalkVisitorAvatar[],
     showAvatars: boolean
   ): void {
     this.walkPos = localPos;
-    if (this.cameraMode === "walk") {
+    if (this.cameraMode === "walk" && !this.cabinetFocusActive) {
       const aspect = this.rw / Math.max(1, this.rh);
       const desired = this.computeCameraFraming("walk", aspect);
       this.camDesiredFov = desired.fov;
@@ -2274,7 +2479,22 @@ export class ArcadeStage {
     this.visitorsGroup.visible = showAvatars;
     if (!showAvatars) return;
 
-    const activeIds = new Set(visitors.map((v) => v.id));
+    // Combine remote WebSocket visitors with lively simulated NPC patrons
+    const combinedVisitors: WalkVisitorAvatar[] = [
+      ...visitors,
+      ...this.npcPatrons.map((npc) => ({
+        id: npc.id,
+        name: npc.name,
+        color: npc.color,
+        x: npc.x,
+        z: npc.z,
+        yaw: npc.yaw,
+        status: npc.status,
+        lastEmote: npc.lastEmote,
+      })),
+    ];
+
+    const activeIds = new Set(combinedVisitors.map((v) => v.id));
     for (const [id, grp] of this.avatarPool.entries()) {
       if (!activeIds.has(id)) {
         this.visitorsGroup.remove(grp);
@@ -2282,7 +2502,8 @@ export class ArcadeStage {
       }
     }
 
-    for (const v of visitors) {
+    const now = Date.now();
+    for (const v of combinedVisitors) {
       let grp = this.avatarPool.get(v.id);
       if (!grp) {
         grp = new THREE.Group();
@@ -2294,7 +2515,7 @@ export class ArcadeStage {
           color: C.lpeach,
           roughness: 0.5,
         });
-        const visorMat = new THREE.MeshBasicMaterial({ color: C.yellow });
+        const visorMat = new THREE.MeshBasicMaterial({ color: v.color || C.yellow });
         const torso = new THREE.Mesh(
           new THREE.CylinderGeometry(0.11, 0.14, 0.42, 10),
           bodyMat
@@ -2317,11 +2538,62 @@ export class ArcadeStage {
         ring.rotation.x = -Math.PI / 2;
         ring.position.y = 0.01;
         grp.add(torso, head, visor, ring);
+
+        // Floating retro nametag
+        const nameplate = this.createRetroTextSprite(
+          v.name || "VISITOR",
+          "rgba(14, 9, 25, 0.88)",
+          v.color || "#00f0ff",
+          "#ffffff",
+          false
+        );
+        nameplate.sprite.position.set(0, 0.74, 0);
+        grp.add(nameplate.sprite);
+
+        // Floating emote / speech bubble
+        const bubble = this.createRetroTextSprite(
+          "",
+          "rgba(255, 255, 255, 0.96)",
+          v.color || "#ff007f",
+          "#12091e",
+          true
+        );
+        bubble.sprite.position.set(0, 1.05, 0);
+        bubble.sprite.visible = false;
+        grp.add(bubble.sprite);
+
+        grp.userData = {
+          nameplate,
+          bubble,
+          lastName: v.name,
+          lastEmoteText: "",
+        };
+
         this.visitorsGroup.add(grp);
         this.avatarPool.set(v.id, grp);
       }
+
       grp.position.set(v.x, 0, v.z);
       grp.rotation.y = v.yaw;
+
+      // Update nametag if changed
+      if (grp.userData.lastName !== v.name) {
+        grp.userData.nameplate.updateText(v.name || "VISITOR");
+        grp.userData.lastName = v.name;
+      }
+
+      // Check for active emote within the last 6 seconds
+      const emote = v.lastEmote;
+      if (emote && now - emote.time < 6000) {
+        const bubbleText = `${emote.emoji ? emote.emoji + " " : ""}${emote.text}`;
+        if (grp.userData.lastEmoteText !== bubbleText) {
+          grp.userData.bubble.updateText(bubbleText);
+          grp.userData.lastEmoteText = bubbleText;
+        }
+        grp.userData.bubble.sprite.visible = true;
+      } else {
+        grp.userData.bubble.sprite.visible = false;
+      }
     }
   }
 
@@ -2628,6 +2900,80 @@ export class ArcadeStage {
     return machine.trigger();
   }
 
+  public dollyToCabinet(machineId: string, onComplete?: () => void): void {
+    if (machineId === "pixel_chess") {
+      this.cabinetFocusActive = true;
+      this.freeWalkActive = false;
+      this.exitPointerLock();
+
+      // Smoothly zoom camera to Pixel Chess CRT screen at (1.6, 1.24, -1.04)
+      this.camDesiredTarget.set(1.6, 1.24, -1.04);
+      this.camDesiredPos.set(1.52, 1.25, -0.65);
+      this.camDesiredFov = 34;
+      this.camDesiredShiftX = 0;
+
+      if (onComplete) {
+        setTimeout(onComplete, 450);
+      }
+    }
+  }
+
+  public exitCabinetView(onComplete?: () => void): void {
+    this.cabinetFocusActive = false;
+    this.freeWalkActive = true;
+    // Step player back slightly in front of the cabinet
+    this.walkPlayerPos.set(1.48, 1.42, -0.38);
+    this.walkYaw = -0.25;
+    this.walkPitch = -0.06;
+    if (onComplete) {
+      setTimeout(onComplete, 300);
+    }
+  }
+
+  public getActivePatronCount(): number {
+    return this.npcPatrons.length;
+  }
+
+  private updateNpcPatrons(dt: number): void {
+    const now = Date.now();
+    for (const npc of this.npcPatrons) {
+      if (npc.waitTimer > 0) {
+        npc.waitTimer -= dt;
+        if (npc.waitTimer <= 0) {
+          npc.wpIndex = (npc.wpIndex + 1) % npc.waypoints.length;
+          const wp = npc.waypoints[npc.wpIndex];
+          npc.targetX = wp.x;
+          npc.targetZ = wp.z;
+          npc.status = `Walking to ${wp.status}`;
+        }
+      } else {
+        const dx = npc.targetX - npc.x;
+        const dz = npc.targetZ - npc.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.08) {
+          const moveStep = Math.min(dist, npc.speed * dt);
+          npc.x += (dx / dist) * moveStep;
+          npc.z += (dz / dist) * moveStep;
+          npc.yaw = Math.atan2(dx, -dz);
+        } else {
+          const wp = npc.waypoints[npc.wpIndex];
+          npc.x = wp.x;
+          npc.z = wp.z;
+          npc.yaw = wp.yaw;
+          npc.status = wp.status;
+          npc.waitTimer = 8.0 + Math.random() * 6.0;
+          if (wp.emote) {
+            npc.lastEmote = {
+              emoji: wp.emote.emoji,
+              text: wp.emote.text,
+              time: now,
+            };
+          }
+        }
+      }
+    }
+  }
+
   private updateFreeWalkCamera(dt: number): void {
     // 1. Forward and right unit vectors on the horizontal XZ plane
     // walkYaw = 0 points towards -Z (looking straight into the arcade room)
@@ -2721,6 +3067,16 @@ export class ArcadeStage {
       this.walkPlayerPos.x < -0.15
     ) {
       this.walkPlayerPos.z = 3.12;
+    }
+
+    // G. Pixel Chess Arcade Cabinet (X: 1.6, Z: -1.2)
+    const dxChess = this.walkPlayerPos.x - 1.6;
+    const dzChess = this.walkPlayerPos.z - -1.2;
+    const distChess = Math.hypot(dxChess, dzChess);
+    if (distChess < 0.68) {
+      const scale = 0.68 / (distChess || 0.001);
+      this.walkPlayerPos.x = 1.6 + dxChess * scale;
+      this.walkPlayerPos.z = -1.2 + dzChess * scale;
     }
 
     // 7. Subtle head bobbing & Footstep SFX when walking
@@ -3064,6 +3420,9 @@ export class ArcadeStage {
     }
 
     this.updateProgressiveTransitions(dt, t);
+
+    // Update lively simulated retro arcade patrons
+    this.updateNpcPatrons(dt);
 
     // Update all 90s interactive arcade machines
     for (const m of this.interactiveMachines) {

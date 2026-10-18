@@ -9,6 +9,8 @@ export interface RoomVisitor {
   z: number;
   yaw: number;
   station: string;
+  status?: string;
+  lastEmote?: { text: string; emoji?: string; time: number };
   activeGameId: string | null;
   updatedAt: number;
 }
@@ -177,9 +179,29 @@ export function attachMultiplayerServer(httpServer: HttpServer): void {
           if (typeof msg.z === "number") v.z = Math.max(-2.2, Math.min(3.8, msg.z));
           if (typeof msg.yaw === "number") v.yaw = msg.yaw;
           if (typeof msg.station === "string") v.station = msg.station;
+          if (typeof msg.status === "string") v.status = msg.status.slice(0, 24);
           if (msg.activeGameId !== undefined) v.activeGameId = msg.activeGameId;
           v.updatedAt = Date.now();
           broadcastAll({ type: "visitor:moved", visitor: v }, clientId);
+          break;
+        }
+
+        case "visitor:emote": {
+          if (!clientId) break;
+          const v = visitors.get(clientId);
+          if (!v) break;
+          const text = String(msg.text || "").slice(0, 48);
+          const emoji = typeof msg.emoji === "string" ? msg.emoji.slice(0, 4) : undefined;
+          v.lastEmote = { text, emoji, time: Date.now() };
+          broadcastAll({
+            type: "visitor:emote",
+            id: clientId,
+            name: v.name,
+            color: v.color,
+            text,
+            emoji,
+            timestamp: Date.now(),
+          });
           break;
         }
 

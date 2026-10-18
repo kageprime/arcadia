@@ -6,6 +6,8 @@ export interface RemoteVisitor {
   z: number;
   yaw: number;
   station: string;
+  status?: string;
+  lastEmote?: { text: string; emoji?: string; time: number };
   activeGameId: string | null;
   updatedAt: number;
 }
@@ -53,6 +55,13 @@ export type LudoNetworkAction =
 type Listener = () => void;
 type LudoActionListener = (senderId: string, action: LudoNetworkAction) => void;
 type LobbyStartListener = (lobby: MultiplayerLobby) => void;
+export type EmoteListener = (data: {
+  id: string;
+  name: string;
+  color?: string;
+  text: string;
+  emoji?: string;
+}) => void;
 
 class MultiplayerClient {
   private ws: WebSocket | null = null;
@@ -68,6 +77,7 @@ class MultiplayerClient {
   private listeners = new Set<Listener>();
   private ludoListeners = new Set<LudoActionListener>();
   private startListeners = new Set<LobbyStartListener>();
+  private emoteListeners = new Set<EmoteListener>();
   private lastMoveSentAt = 0;
 
   constructor() {
@@ -172,6 +182,29 @@ class MultiplayerClient {
         if (msg.visitor?.id) {
           this.visitors.set(msg.visitor.id, msg.visitor);
           this.notify();
+        }
+        break;
+      }
+      case "visitor:emote": {
+        if (msg.id) {
+          const v = this.visitors.get(msg.id);
+          if (v) {
+            v.lastEmote = {
+              text: String(msg.text || ""),
+              emoji: msg.emoji,
+              time: msg.timestamp || Date.now(),
+            };
+            this.notify();
+          }
+          for (const fn of this.emoteListeners) {
+            fn({
+              id: msg.id,
+              name: msg.name || "PLAYER",
+              color: msg.color,
+              text: String(msg.text || ""),
+              emoji: msg.emoji,
+            });
+          }
         }
         break;
       }
@@ -411,6 +444,30 @@ class MultiplayerClient {
   public onLobbyStart(fn: LobbyStartListener): () => void {
     this.startListeners.add(fn);
     return () => this.startListeners.delete(fn);
+  }
+
+  public sendEmote(text: string, emoji?: string): void {
+    const clean = String(text || "").trim().slice(0, 48);
+    if (!clean && !emoji) return;
+    this.send({ type: "visitor:emote", text: clean, emoji });
+    const selfVis = this.visitors.get(this.selfId);
+    if (selfVis) {
+      selfVis.lastEmote = { text: clean, emoji, time: Date.now() };
+    }
+    for (const fn of this.emoteListeners) {
+      fn({
+        id: this.selfId,
+        name: this.selfName,
+        text: clean,
+        emoji,
+      });
+    }
+    this.notify();
+  }
+
+  public onEmote(fn: EmoteListener): () => void {
+    this.emoteListeners.add(fn);
+    return () => this.emoteListeners.delete(fn);
   }
 
   private notify(): void {

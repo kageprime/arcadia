@@ -1255,3 +1255,271 @@ export function createWallDecorations(): THREE.Group {
 
   return group;
 }
+
+/**
+ * Builds the dedicated Pixel Chess Arcade Cabinet:
+ * Gold & ivory trim, chessboard side art, glowing "PIXEL CHESS" marquee,
+ * and animated pixel chess game preview on CRT screen.
+ */
+export function createPixelChessCabinet(
+  x: number,
+  z: number,
+  rotY = 0
+): { group: THREE.Group; machine: InteractiveMachine; crtMesh: THREE.Mesh } {
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  group.rotation.y = rotY;
+
+  // Cabinet Body (Chassis + Monitor Bezel + Marquee Hood)
+  const chassisGeos = [
+    makeBox(0.72, 0.74, 0.82, 0, 0.37, 0),
+    makeBox(0.72, 0.88, 0.66, 0, 1.12, -0.06),
+    makeBox(0.72, 0.3, 0.46, 0, 1.66, 0.08),
+  ];
+  const chassisMesh = new THREE.Mesh(
+    mergeGeometries(chassisGeos),
+    new THREE.MeshLambertMaterial({ color: 0x140e1d })
+  );
+  chassisMesh.castShadow = true;
+  chassisMesh.receiveShadow = true;
+  group.add(chassisMesh);
+
+  // Polished Gold Molding / T-Molding Trim
+  const goldTrimGeos = [
+    makeBox(0.04, 1.82, 0.04, -0.37, 0.91, 0.36),
+    makeBox(0.04, 1.82, 0.04, 0.37, 0.91, 0.36),
+    makeBox(0.76, 0.04, 0.04, 0, 1.82, 0.32),
+    makeBox(0.76, 0.04, 0.04, 0, 0.76, 0.42),
+  ];
+  const goldTrimMesh = new THREE.Mesh(
+    mergeGeometries(goldTrimGeos),
+    new THREE.MeshStandardMaterial({
+      color: 0xffcc00,
+      metalness: 0.88,
+      roughness: 0.22,
+    })
+  );
+  group.add(goldTrimMesh);
+
+  // Checkered Side Art Panels (Left & Right)
+  const sideCanvas = document.createElement("canvas");
+  sideCanvas.width = 256;
+  sideCanvas.height = 512;
+  const sctx = sideCanvas.getContext("2d")!;
+  sctx.fillStyle = "#12091c";
+  sctx.fillRect(0, 0, 256, 512);
+
+  // Gold border
+  sctx.strokeStyle = "#ffd700";
+  sctx.lineWidth = 6;
+  sctx.strokeRect(8, 8, 240, 496);
+
+  // Chessboard pattern stripe
+  const tileSize = 24;
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      sctx.fillStyle = (r + c) % 2 === 0 ? "#fff2b2" : "#301934";
+      sctx.fillRect(32 + c * tileSize, 64 + r * tileSize, tileSize, tileSize);
+    }
+  }
+
+  // Pixel Chess Knight Silhouette & Title
+  sctx.fillStyle = "#ffd700";
+  sctx.font = "bold 20px 'Press Start 2P', monospace";
+  sctx.textAlign = "center";
+  sctx.fillText("PIXEL", 128, 300);
+  sctx.fillText("CHESS", 128, 330);
+  sctx.fillStyle = "#00f0ff";
+  sctx.font = "10px 'Press Start 2P', monospace";
+  sctx.fillText("BY KAGEPRIME", 128, 360);
+
+  // Crown symbol
+  sctx.fillStyle = "#ff007f";
+  sctx.font = "32px sans-serif";
+  sctx.fillText("♚", 128, 420);
+
+  const sideTex = new THREE.CanvasTexture(sideCanvas);
+  const sideMat = new THREE.MeshLambertMaterial({ map: sideTex });
+
+  const leftSide = new THREE.Mesh(new THREE.PlaneGeometry(0.82, 1.45), sideMat);
+  leftSide.rotation.y = -Math.PI / 2;
+  leftSide.position.set(-0.365, 0.95, 0.05);
+  group.add(leftSide);
+
+  const rightSide = new THREE.Mesh(new THREE.PlaneGeometry(0.82, 1.45), sideMat);
+  rightSide.rotation.y = Math.PI / 2;
+  rightSide.position.set(0.365, 0.95, 0.05);
+  group.add(rightSide);
+
+  // Glowing "PIXEL CHESS" Marquee
+  const mqCanvas = document.createElement("canvas");
+  mqCanvas.width = 512;
+  mqCanvas.height = 140;
+  const mqCtx = mqCanvas.getContext("2d")!;
+  mqCtx.fillStyle = "#0b0614";
+  mqCtx.fillRect(0, 0, 512, 140);
+
+  // Neon gold & cyan outer glow
+  mqCtx.shadowColor = "#ffd700";
+  mqCtx.shadowBlur = 14;
+  mqCtx.strokeStyle = "#ffd700";
+  mqCtx.lineWidth = 6;
+  mqCtx.strokeRect(8, 8, 496, 124);
+
+  mqCtx.fillStyle = "#ffffff";
+  mqCtx.font = "bold 28px 'Press Start 2P', monospace";
+  mqCtx.textAlign = "center";
+  mqCtx.shadowColor = "#00f0ff";
+  mqCtx.shadowBlur = 18;
+  mqCtx.fillText("PIXEL CHESS", 256, 68);
+
+  mqCtx.fillStyle = "#ffcc00";
+  mqCtx.font = "bold 13px 'Press Start 2P', monospace";
+  mqCtx.shadowBlur = 0;
+  mqCtx.fillText("♞ ONLINE & TOWER ♞", 256, 108);
+
+  const mqTex = new THREE.CanvasTexture(mqCanvas);
+  const mqMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.66, 0.24),
+    new THREE.MeshBasicMaterial({ map: mqTex })
+  );
+  mqMesh.position.set(0, 1.66, 0.32);
+  group.add(mqMesh);
+
+  // Control Deck (Console with dual joysticks & 12 chess-style black/ivory buttons)
+  const deck = new THREE.Mesh(
+    makeBox(0.7, 0.08, 0.34, 0, 0.88, 0.3, 0, 0.22, 0),
+    new THREE.MeshLambertMaterial({ color: 0x1f192b })
+  );
+  group.add(deck);
+
+  // Joysticks with golden spherical tops
+  const joyMat = new THREE.MeshStandardMaterial({
+    color: 0xffd700,
+    metalness: 0.9,
+    roughness: 0.2,
+  });
+  const joy1 = new THREE.Mesh(new THREE.SphereGeometry(0.026, 8, 8), joyMat);
+  const joy2 = new THREE.Mesh(new THREE.SphereGeometry(0.026, 8, 8), joyMat);
+  joy1.position.set(-0.18, 0.96, 0.31);
+  joy2.position.set(0.18, 0.96, 0.31);
+  group.add(joy1, joy2);
+
+  // Ivory & Onyx arcade push buttons
+  const btnIvory = new THREE.MeshBasicMaterial({ color: 0xfff3d1 });
+  const btnOnyx = new THREE.MeshBasicMaterial({ color: 0x333333 });
+  for (let i = 0; i < 6; i++) {
+    const b1 = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.015, 0.015, 0.015, 8),
+      i % 2 === 0 ? btnIvory : btnOnyx
+    );
+    b1.rotation.x = 0.22;
+    b1.position.set(-0.1 + (i % 3) * 0.038, 0.93, 0.26 + Math.floor(i / 3) * 0.045);
+    group.add(b1);
+
+    const b2 = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.015, 0.015, 0.015, 8),
+      i % 2 === 0 ? btnIvory : btnOnyx
+    );
+    b2.rotation.x = 0.22;
+    b2.position.set(0.24 + (i % 3) * 0.038, 0.93, 0.26 + Math.floor(i / 3) * 0.045);
+    group.add(b2);
+  }
+
+  // CRT Screen Canvas (renders animated 8-bit chessboard preview)
+  const crtCanvas = document.createElement("canvas");
+  crtCanvas.width = 160;
+  crtCanvas.height = 128;
+  const cctx = crtCanvas.getContext("2d")!;
+  const crtTex = new THREE.CanvasTexture(crtCanvas);
+  const crtMat = new THREE.MeshBasicMaterial({ map: crtTex });
+  const crtMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.56, 0.42), crtMat);
+  crtMesh.position.set(0, 1.24, 0.16);
+  crtMesh.rotation.x = -0.18;
+  group.add(crtMesh);
+
+  // Golden Coin Door
+  const coinDoor = new THREE.Mesh(
+    makeBox(0.34, 0.38, 0.02, 0, 0.44, 0.42),
+    new THREE.MeshStandardMaterial({ color: 0x241d33, metalness: 0.7, roughness: 0.3 })
+  );
+  group.add(coinDoor);
+
+  const coinSlots = new THREE.Mesh(
+    makeBox(0.16, 0.04, 0.02, 0, 0.52, 0.44),
+    new THREE.MeshBasicMaterial({ color: 0xffaa00 })
+  );
+  group.add(coinSlots);
+
+  // Screen & Marquee Lighting
+  const cabLight = new THREE.PointLight(0xffdd66, 1.2, 2.5);
+  cabLight.position.set(0, 1.3, 0.5);
+  group.add(cabLight);
+
+  let animTimer = 0;
+
+  const machine: InteractiveMachine = {
+    id: "pixel_chess",
+    name: "Pixel Chess Arcade",
+    actionLabel: "Play Pixel Chess (Kageprime)",
+    pos: new THREE.Vector3(x, 1.0, z),
+    radius: 1.65,
+    trigger: () => {
+      humController.playArcadeCoin();
+      cabLight.intensity = 2.8;
+      setTimeout(() => {
+        cabLight.intensity = 1.2;
+      }, 400);
+      return "*COIN INSERTED!* Launching Pixel Chess by Kageprime...";
+    },
+    update: (dt, time) => {
+      animTimer += dt * 2.5;
+
+      // Draw lively animated retro chessboard
+      cctx.fillStyle = "#0c0715";
+      cctx.fillRect(0, 0, 160, 128);
+
+      // 8x8 Board centered
+      const bSize = 96;
+      const bX = 32;
+      const bY = 16;
+      const sq = bSize / 8;
+
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          const isLight = (r + c) % 2 === 0;
+          cctx.fillStyle = isLight ? "#f0d9b5" : "#b58863";
+          cctx.fillRect(bX + c * sq, bY + r * sq, sq, sq);
+        }
+      }
+
+      // Animated jumping piece (knight moving)
+      const jumpCycle = Math.sin(animTimer * 3);
+      const pieceCol = Math.floor(animTimer) % 6;
+      cctx.fillStyle = "#ff0055";
+      cctx.font = "bold 12px sans-serif";
+      cctx.fillText("♞", bX + (1 + pieceCol) * sq + 1, bY + 4 * sq + 10 + Math.min(0, jumpCycle * 4));
+
+      // King on board
+      cctx.fillStyle = "#ffffff";
+      cctx.fillText("♚", bX + 4 * sq + 1, bY + 7 * sq + 10);
+      cctx.fillStyle = "#111111";
+      cctx.fillText("♚", bX + 4 * sq + 1, bY + 10);
+
+      // Title header
+      cctx.fillStyle = "#00f0ff";
+      cctx.font = "bold 8px 'Press Start 2P', monospace";
+      cctx.textAlign = "center";
+      cctx.fillText("PRESS E TO PLAY", 80, 122);
+
+      // Scanlines
+      cctx.fillStyle = "rgba(0, 0, 0, 0.28)";
+      for (let y = 0; y < 128; y += 3) {
+        cctx.fillRect(0, y, 160, 1);
+      }
+      crtTex.needsUpdate = true;
+    },
+  };
+
+  return { group, machine, crtMesh };
+}
